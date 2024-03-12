@@ -1,0 +1,96 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+V.Local.sSql.Declare
+
+'This project was created fro Korman Signs,by SKC on 3/16/2018
+'The point of this script is so that the document control links are saved to a custom table to link back to the report.  In the report the files returned are images and will show on the extended bar code report.  
+
+'Updated 3/2020 by TJS for Korman Signs.
+
+F.Intrinsic.Control.If(V.Caller.Hook,=,"16090")
+	F.ODBC.Connection!conts.OpenCompanyConnection()
+	F.Intrinsic.Control.If(V.Passed.BIP_REPORTID,=,"001811")
+		'Get Job Suffix,Seq,and Part
+		F.Intrinsic.String.Build("Select Job,Suffix,Router_Seq as Seq,PWC,LMO from BI_Bar_Detail where Terminal= '{0}' and RPTID= '001811' and LMO IN ('L','M','O') and Router_Seq < '990000'",V.Passed.BIP_Terminal,V.Local.sSql)
+		F.Data.DataTable.CreateFromSQL("dtJobs","conts",V.Local.sSql,True)
+		F.Intrinsic.Control.CallSub(DocControl)
+		F.Intrinsic.Control.CallSub(SavetoDB)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!conts.Close
+F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.CallSub(Unload)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.DocControl.Start
+F.Intrinsic.Control.Try
+V.Local.iCount.Declare
+V.Local.iLinkID.Declare
+V.Local.sFile.Declare
+V.Local.sSql.Declare
+
+'Get the Links needed for the report and save to a custom table.
+F.Data.DataTable.AddExpressionColumn("dtJobs","LinkID","String","Job+Suffix+Seq")
+F.Data.DataTable.AddColumn("dtJobs","FilePath","String")
+F.Intrinsic.Control.For(V.Local.iCount,0,V.DataTable.dtJobs.RowCount--,1)
+	'check to see if we have an image for the sequence first
+	F.Global.DocumentControl.GetLinkID(V.DataTable.dtJobs(V.Local.iCount).LinkID!FieldvalTrim,"00025",V.Local.iLinkID)
+	F.Intrinsic.String.Build("Select TOP 1 ((Rtrim(Path))+(Rtrim(file))) as FilePath from ATG_Doc_Assoc where Link_ID= '{0}' and GRP_ID= 1",V.Local.iLinkID,V.Local.sSql)
+	F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSql,V.Local.sFile)
+	F.Intrinsic.Control.If(V.Local.sFile.Trim,=,"")
+		F.Intrinsic.Control.If(V.DataTable.dtJobs(V.Local.iCount).LMO!fieldvaltrim,=,"M")
+			'check to see if there is an image for the part
+			F.Global.DocumentControl.GetLinkID(V.DataTable.dtJobs(V.Local.iCount).PWC!FieldvalTrim,"00030",V.Local.iLinkID)
+			F.Intrinsic.String.Build("Select TOP 1 ((Rtrim(Path))+(Rtrim(file))) as FilePath from ATG_Doc_Assoc where Link_ID= '{0}' and GRP_ID= 1",V.Local.iLinkID,V.Local.sSql)
+			F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSql,V.Local.sFile)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	F.Data.DataTable.SetValue("dtJobs",V.Local.iCount,"FilePath",V.Local.sFile.Trim)
+F.Intrinsic.Control.Next(V.Local.iCount)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.DocControl.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.SavetoDB.Start
+F.Intrinsic.Control.Try
+V.Local.sSql.Declare
+
+F.Data.DataTable.AddColumn("dtJobs","BIRun","String")
+F.Data.DataTable.AddColumn("dtJobs","Terminal","String")
+F.Data.DataTable.SetValue("dtJobs",-1,"BIRun",V.Passed.BIP_ReportID)
+F.Data.DataTable.SetValue("dtJobs",-1,"Terminal",V.Passed.BIP_Terminal)
+F.Data.DataTable.RemoveColumn("dtJobs","LinkID")
+F.Data.DataTable.RemoveColumn("dtJobs","LMO")
+F.Data.DataTable.RemoveColumn("dtJobs","PWC")
+'remove any previous data from the table based on Terminal.
+F.Intrinsic.String.Build("Delete From GCG_4927_Filepath where Terminal= '{0}'",V.Passed.BIP_Terminal,V.Local.sSql)
+F.ODBC.Connection!conts.Execute(V.Local.sSql)
+'save the links to the Custom table
+F.Data.DataTable.SaveToDB("dtJobs","conts","GCG_4927_FilePath","Terminal*!*BIRun",128)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.SavetoDB.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+V.Local.iRet.Declare
+V.Local.sSep.Declare
+
+F.Intrinsic.String.Build("-------------------------------------------------------------------------------------",,V.Local.sSep)
+F.Intrinsic.String.Build("({5}-{6}){0}{7}{0}Project: {4}{0}{7}{0}Sub: {1}{0}Error: {2},{3}",V.Ambient.NewLine,V.Args.SubRoutine,V.Args.eNumber,V.Args.eDescription,V.Caller.ScriptFile,V.Ambient.Date,V.Ambient.Time,V.Local.sSep,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError,"Error",V.Local.iRet)
+Program.Sub.Error.End
